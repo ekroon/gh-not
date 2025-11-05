@@ -1,6 +1,7 @@
 package notifications
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -203,11 +204,11 @@ func TestRenderNoPanic(t *testing.T) {
 			ID:     "1",
 			Unread: true,
 			Repository: Repository{
-				FullName: "org/repo-" + string(make([]rune, 200)), // Very long name
+				FullName: "org/repo-" + strings.Repeat("x", 200), // Very long name
 			},
 			Author: User{Login: "verylongusernamethatmightcausewrapping"},
 			Subject: Subject{
-				Title: string(make([]rune, 500)), // Very long title
+				Title: strings.Repeat("x", 500), // Very long title
 				Type:  "Issue",
 				State: "open",
 			},

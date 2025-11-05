@@ -89,8 +89,8 @@ func (n Notification) prettyState() string {
 
 func (n Notifications) String() string {
 	var sb strings.Builder
-	for _, notification := range n {
-		_, _ = sb.WriteString(fmt.Sprintf("%s\n", notification))
+	for _, notif := range n {
+		_, _ = sb.WriteString(fmt.Sprintf("%s\n", notif))
 	}
 
 	return sb.String()
@@ -137,16 +137,16 @@ func (n Notifications) Render() error {
 	}
 
 	// Default to a simple string
-	for _, n := range n {
-		n.rendered = fmt.Sprintf(
+	for _, notif := range n {
+		notif.rendered = fmt.Sprintf(
 			"%s %s %s %s by %s at %s: '%s'",
-			n.prettyRead(),
-			n.prettyType(),
-			n.prettyState(),
-			n.Repository.FullName,
-			n.Author.Login,
-			text.RelativeTimeAgo(time.Now(), n.UpdatedAt),
-			n.Subject.Title)
+			notif.prettyRead(),
+			notif.prettyType(),
+			notif.prettyState(),
+			notif.Repository.FullName,
+			notif.Author.Login,
+			text.RelativeTimeAgo(time.Now(), notif.UpdatedAt),
+			notif.Subject.Title)
 	}
 
 	// Try to render a table
@@ -205,16 +205,16 @@ func (n Notifications) Render() error {
 
 	printer := tableprinter.New(&out, t.IsTerminalOutput(), w)
 
-	for _, n := range n {
-		printer.AddField(n.prettyRead())
-		printer.AddField(n.prettyType())
-		printer.AddField(n.prettyState())
+	for _, notif := range n {
+		printer.AddField(notif.prettyRead())
+		printer.AddField(notif.prettyType())
+		printer.AddField(notif.prettyState())
 
 		// Truncate repository full name
-		repoField := truncate(n.Repository.FullName, repoWidth)
-		if repoField != n.Repository.FullName {
+		repoField := truncate(notif.Repository.FullName, repoWidth)
+		if repoField != notif.Repository.FullName {
 			slog.Debug("truncated repository name",
-				"original", n.Repository.FullName,
+				"original", notif.Repository.FullName,
 				"truncated", repoField,
 				"maxWidth", repoWidth)
 		}
@@ -222,24 +222,24 @@ func (n Notifications) Render() error {
 		printer.AddField(repoField)
 
 		// Author login - cap at maxAuthorWidth characters to be safe
-		authorField := truncate(n.Author.Login, maxAuthorWidth)
+		authorField := truncate(notif.Author.Login, maxAuthorWidth)
 
 		printer.AddField(authorField)
 
 		// Truncate subject title
-		titleField := truncate(n.Subject.Title, titleWidth)
-		if titleField != n.Subject.Title {
+		titleField := truncate(notif.Subject.Title, titleWidth)
+		if titleField != notif.Subject.Title {
 			slog.Debug("truncated title",
-				"original", n.Subject.Title,
+				"original", notif.Subject.Title,
 				"truncated", titleField,
 				"maxWidth", titleWidth)
 		}
 
 		printer.AddField(titleField)
 
-		relativeTime := text.RelativeTimeAgo(time.Now(), n.UpdatedAt)
-		if n.LatestCommentor.Login != "" {
-			relativeTime += " by " + n.LatestCommentor.Login
+		relativeTime := text.RelativeTimeAgo(time.Now(), notif.UpdatedAt)
+		if notif.LatestCommentor.Login != "" {
+			relativeTime += " by " + notif.LatestCommentor.Login
 		}
 
 		printer.AddField(relativeTime)
