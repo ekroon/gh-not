@@ -3,6 +3,7 @@ package notifications
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -12,6 +13,27 @@ import (
 
 	"github.com/nobe4/gh-not/internal/colors"
 )
+
+// truncate truncates a string to a maximum length, adding an ellipsis if truncated.
+// It respects UTF-8 rune boundaries to avoid splitting multi-byte characters.
+func truncate(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+
+	const ellipsisLen = 3
+	// Reserve space for ellipsis
+	if maxLen <= ellipsisLen {
+		return string(runes[:maxLen])
+	}
+
+	return string(runes[:maxLen-ellipsisLen]) + "..."
+}
 
 //nolint:gochecknoglobals // This map is used a lot.
 var prettyRead = map[bool]string{
@@ -66,12 +88,12 @@ func (n Notification) prettyState() string {
 }
 
 func (n Notifications) String() string {
-	out := ""
-	for _, n := range n {
-		out += fmt.Sprintf("%s\n", n)
+	var sb strings.Builder
+	for _, notification := range n {
+		_, _ = sb.WriteString(fmt.Sprintf("%s\n", notification))
 	}
 
-	return out
+	return sb.String()
 }
 
 func (n Notifications) Visible() Notifications {
@@ -106,6 +128,9 @@ func (n Notification) Visible() bool {
 // If possible, render a table, otherwise render a simple string.
 //
 //revive:disable:cognitive-complexity // TODO: simplify.
+//revive:disable:function-length // TODO: refactor.
+//revive:disable:cyclomatic // TODO: simplify.
+//nolint:cyclop // TODO: simplify.
 func (n Notifications) Render() error {
 	if len(n) == 0 {
 		return nil
@@ -134,15 +159,83 @@ func (n Notifications) Render() error {
 		return fmt.Errorf("failed to get terminal size: %w", err)
 	}
 
+	// If terminal is too narrow, skip table rendering and use fallback string format
+	const minTerminalWidth = 60
+	if w < minTerminalWidth {
+		slog.Debug("terminal too narrow for table rendering", "width", w, "min", minTerminalWidth)
+
+		return nil
+	}
+
+	// Calculate dynamic column widths to prevent wrapping
+	const (
+		minRepoWidth  = 10
+		minTitleWidth = 20
+		// Fixed width columns: RD(2) + IS(2) + OP(2) + spacing(~6) + time column(~25 including "by user")
+		fixedWidth     = 37
+		repoPercent    = 30
+		percentDivisor = 100
+		maxAuthorWidth = 25
+	)
+
+	availableWidth := w - fixedWidth
+	if availableWidth < (minRepoWidth + minTitleWidth) {
+		slog.Debug("insufficient width for table columns",
+			"available", availableWidth,
+			"required", minRepoWidth+minTitleWidth)
+
+		return nil
+	}
+
+	// Allocate 30% to repository name, 70% to title
+	repoWidth := availableWidth * repoPercent / percentDivisor
+	repoWidth = max(repoWidth, minRepoWidth)
+
+	titleWidth := availableWidth - repoWidth
+	if titleWidth < minTitleWidth {
+		titleWidth = minTitleWidth
+		repoWidth = availableWidth - titleWidth
+	}
+
+	slog.Debug("calculated column widths",
+		"terminal", w,
+		"available", availableWidth,
+		"repo", repoWidth,
+		"title", titleWidth)
+
 	printer := tableprinter.New(&out, t.IsTerminalOutput(), w)
 
 	for _, n := range n {
 		printer.AddField(n.prettyRead())
 		printer.AddField(n.prettyType())
 		printer.AddField(n.prettyState())
-		printer.AddField(n.Repository.FullName)
-		printer.AddField(n.Author.Login)
-		printer.AddField(n.Subject.Title)
+
+		// Truncate repository full name
+		repoField := truncate(n.Repository.FullName, repoWidth)
+		if repoField != n.Repository.FullName {
+			slog.Debug("truncated repository name",
+				"original", n.Repository.FullName,
+				"truncated", repoField,
+				"maxWidth", repoWidth)
+		}
+
+		printer.AddField(repoField)
+
+		// Author login - cap at maxAuthorWidth characters to be safe
+		authorField := truncate(n.Author.Login, maxAuthorWidth)
+
+		printer.AddField(authorField)
+
+		// Truncate subject title
+		titleField := truncate(n.Subject.Title, titleWidth)
+		if titleField != n.Subject.Title {
+			slog.Debug("truncated title",
+				"original", n.Subject.Title,
+				"truncated", titleField,
+				"maxWidth", titleWidth)
+		}
+
+		printer.AddField(titleField)
 
 		relativeTime := text.RelativeTimeAgo(time.Now(), n.UpdatedAt)
 		if n.LatestCommentor.Login != "" {
@@ -157,7 +250,17 @@ func (n Notifications) Render() error {
 		return fmt.Errorf("failed to render table: %w", err)
 	}
 
-	for i, l := range strings.Split(strings.TrimRight(out.String(), "\n"), "\n") {
+	// Safety guard: prevent index out of range panic
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	for i, l := range lines {
+		if i >= len(n) {
+			slog.Warn("more output lines than notifications",
+				"lines", len(lines),
+				"notifications", len(n))
+
+			break
+		}
+
 		n[i].rendered = l
 	}
 
